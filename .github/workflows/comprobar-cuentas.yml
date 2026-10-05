@@ -9,12 +9,22 @@ on:
         description: Enviar el informe a Telegram
         type: boolean
         default: true
+      email:
+        description: Enviar el Excel por correo
+        type: boolean
+        default: false
+      pages:
+        description: Publicar el panel seguro en GitHub Pages
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
-  group: alcampo-${{ github.repository }}
+  group: alcampo-\${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -22,12 +32,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      GOOGLE_CREDS_B64: ${{ secrets.GOOGLE_CREDS_B64 }}
-      SHEET_ID: ${{ vars.SHEET_ID }}
-      WORKSHEET: ${{ vars.WORKSHEET }}
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-      CHAT_ID: ${{ secrets.CHAT_ID }}
-      SEND_TELEGRAM: ${{ (github.event_name == 'workflow_dispatch' && inputs.telegram) || (github.event_name == 'schedule' && vars.SEND_TELEGRAM != 'false') }}
+      GOOGLE_CREDS_B64: \${{ secrets.GOOGLE_CREDS_B64 }}
+      SHEET_ID: \${{ vars.SHEET_ID }}
+      WORKSHEET: \${{ vars.WORKSHEET }}
+      BOT_TOKEN: \${{ secrets.BOT_TOKEN }}
+      CHAT_ID: \${{ secrets.CHAT_ID }}
+      EMAIL_TO: \${{ secrets.EMAIL_TO }}
+      EMAIL_USERNAME: \${{ secrets.EMAIL_USERNAME }}
+      EMAIL_PASSWORD: \${{ secrets.EMAIL_PASSWORD }}
+      SMTP_HOST: \${{ vars.SMTP_HOST }}
+      SMTP_PORT: \${{ vars.SMTP_PORT }}
+      SMTP_SECURITY: \${{ vars.SMTP_SECURITY }}
+      SEND_TELEGRAM: \${{ (github.event_name == 'workflow_dispatch' && inputs.telegram) || (github.event_name == 'schedule' && vars.SEND_TELEGRAM != 'false') }}
+      SEND_EMAIL: \${{ (github.event_name == 'workflow_dispatch' && inputs.email) || (github.event_name == 'schedule' && vars.SEND_EMAIL == 'true') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,7 +62,10 @@ jobs:
           if [[ "$SEND_TELEGRAM" == "true" ]]; then
             args+=(--telegram)
           fi
-          python script.py "${args[@]}"
+          if [[ "$SEND_EMAIL" == "true" ]]; then
+            args+=(--email)
+          fi
+          python script.py "\${args[@]}"
       - name: Instalar Chromium
         run: python -m playwright install --with-deps chromium
       - name: Probar Chromium con la web ficticia local
@@ -55,19 +75,46 @@ jobs:
       - name: Consultar y generar informe
         shell: bash
         run: |
-          args=(--max-seconds 3000)
+          args=(--max-seconds 3000 --dashboard-dir site)
           if [[ "$SEND_TELEGRAM" == "true" ]]; then
             args+=(--telegram)
           fi
-          python script.py "${args[@]}"
+          if [[ "$SEND_EMAIL" == "true" ]]; then
+            args+=(--email)
+          fi
+          python script.py "\${args[@]}"
       - name: Conservar informe y progreso, también si falla la ejecución
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: resultados-${{ github.run_id }}
+          name: resultados-\${{ github.run_id }}
           path: |
             resultados/resultados.xlsx
+            resultados/cuentas_no_funcionan.xlsx
             resultados/progreso.json
+            site/
           if-no-files-found: ignore
           retention-days: 1
+      - name: Configurar GitHub Pages
+        if: \${{ success() && ((github.event_name == 'workflow_dispatch' && inputs.pages) || (github.event_name == 'schedule' && vars.PUBLISH_PAGES == 'true')) }}
+        uses: actions/configure-pages@v5
+      - name: Preparar panel para GitHub Pages
+        if: \${{ success() && ((github.event_name == 'workflow_dispatch' && inputs.pages) || (github.event_name == 'schedule' && vars.PUBLISH_PAGES == 'true')) }}
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
 
+  publicar:
+    if: \${{ needs.consultar.result == 'success' && ((github.event_name == 'workflow_dispatch' && inputs.pages) || (github.event_name == 'schedule' && vars.PUBLISH_PAGES == 'true')) }}
+    needs: consultar
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: \${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publicar panel
+        id: deployment
+        uses: actions/deploy-pages@v4
