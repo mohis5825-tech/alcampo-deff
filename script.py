@@ -10,7 +10,11 @@ from alcampo.core import (
     ConfigError, FINAL_STATES, TECHNICAL_STATES, atomic_json, fingerprint,
     load_config, now, read_checkpoint, result,
 )
-from alcampo.reports import export_excel, send_excel, telegram_config
+from alcampo.dashboard import export_dashboard
+from alcampo.reports import (
+    email_config, export_excel, export_invalid_excel, send_email,
+    send_excel, telegram_config,
+)
 from alcampo.sources import read_accounts
 
 ROOT = Path(__file__).resolve().parent
@@ -34,6 +38,8 @@ def arguments():
     parser.add_argument("--resume", action="store_true", help="Reutilizar resultados terminales de progreso.json, hasta 24 horas")
     parser.add_argument("--check-config", action="store_true", help="Leer y validar la fuente sin visitar Alcampo ni enviar mensajes")
     parser.add_argument("--telegram", action="store_true", help="Enviar el Excel al destino configurado")
+    parser.add_argument("--email", action="store_true", help="Enviar el Excel por correo SMTP")
+    parser.add_argument("--dashboard-dir", type=Path, help="Crear un panel estático sin contraseñas")
     return parser.parse_args()
 
 
@@ -41,6 +47,8 @@ def run(args):
     config = load_config(args.config)
     if args.telegram:
         telegram_config(config)  # Validar antes del trabajo; no hace peticiones.
+    if getattr(args, "email", False):
+        email_config()  # Validar antes del trabajo; no hace peticiones.
     accounts = read_accounts(config, args.input_file)
     if args.limit:
         accounts = accounts[:args.limit]
@@ -123,13 +131,41 @@ def run(args):
         "Motivo de parada": stop_reason or "Lista procesada",
         "Saldo total EUR": sum(r["saldo_centimos"] or 0 for r in rows if r["estado"] == "SALDO_OK") / 100,
     }
-    export_excel(rows, report_path, metadata)
+    valid_rows = [row for row in rows if row["estado"] == "SALDO_OK"]
+    invalid_rows = [row for row in rows if row["estado"] != "SALDO_OK"]
+    export_excel(valid_rows, report_path, metadata)
+    invalid_report_path = output / "cuentas_no_funcionan.xlsx"
+    export_invalid_excel(invalid_rows, invalid_report_path, {
+        "Cuentas excluidas": len(invalid_rows),
+        "Motivo": "No se publican cuentas sin saldo leído correctamente",
+        "Final UTC": metadata["Final UTC"],
+    })
     print(f"Informe guardado: {report_path}")
-    print(f"Saldos leídos: {good}; errores técnicos: {technical}; pendientes: {len(accounts)-len(done)}.")
+    print(f"Informe separado de cuentas excluidas: {invalid_report_path}")
+    print(f"Saldos leídos: {good}; excluidas: {len(invalid_rows)}; errores técnicos: {technical}; pendientes: {len(accounts)-len(done)}.")
+    dashboard_dir = getattr(args, "dashboard_dir", None)
+    if dashboard_dir:
+        export_dashboard(rows, metadata, dashboard_dir)
+        print(f"Panel guardado: {dashboard_dir}")
+    notification_errors = []
     if args.telegram:
         caption = f"Alcampo: {len(done)}/{len(accounts)} procesadas; {good} saldos leídos. " + ("Informe completo." if state["complete"] else "INFORME PARCIAL.")
-        send_excel(report_path, config, caption)
-        print("Telegram confirmó el envío.")
+        try:
+            send_excel(report_path, config, caption)
+            print("Telegram confirmó el envío.")
+        except ConfigError as error:
+            notification_errors.append(str(error))
+            print(f"Telegram: {error}", file=sys.stderr)
+    if getattr(args, "email", False):
+        caption = f"Alcampo: {len(done)}/{len(accounts)} procesadas; {good} saldos leídos. " + ("Informe completo." if state["complete"] else "INFORME PARCIAL.")
+        try:
+            send_email(report_path, caption)
+            print("Correo confirmó el envío.")
+        except ConfigError as error:
+            notification_errors.append(str(error))
+            print(f"Correo: {error}", file=sys.stderr)
+    if notification_errors:
+        return 2
     return 3 if stop_reason or not state["complete"] or technical else 0
 
 
