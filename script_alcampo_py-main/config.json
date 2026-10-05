@@ -1,0 +1,19 @@
+{
+  "sheet_id": "18fOcc-X6oCEdxZ4V1b2cI2TyzmeDfjs9griuzOloBvM",
+  "worksheet": "",
+  "login_url": "https://www.compraonline.alcampo.es/login?destination=%2F",
+  "balance_url": "https://www.compraonline.alcampo.es/settings/loyalty",
+  "email_selector": "#uname1",
+  "password_selector": "#pwd1",
+  "submit_selector": "",
+  "balance_selector": "body",
+  "timeout_ms": 30000,
+  "max_consecutive_technical_errors": 5,
+  "pause_seconds": 2,
+  "max_seconds": 3000,
+  "output_dir": "resultados",
+  "allowed_auth_hosts": [
+    "ar-customerdiamond-es.my.site.com"
+  ],
+  "telegram_chat_id": "-5049278431"
+}
