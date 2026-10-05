@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+credenciales*.json
+*service-account*.json
+accounts*.json
+cuentas*.json
+resultados/
+site/
+*.xlsx
+*.log
+*.b64
+.pytest_cache/
