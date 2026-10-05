@@ -24,7 +24,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: alcampo-\${{ github.repository }}
+  group: ${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -32,19 +32,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      GOOGLE_CREDS_B64: \${{ secrets.GOOGLE_CREDS_B64 }}
-      SHEET_ID: \${{ vars.SHEET_ID }}
-      WORKSHEET: \${{ vars.WORKSHEET }}
-      BOT_TOKEN: \${{ secrets.BOT_TOKEN }}
-      CHAT_ID: \${{ secrets.CHAT_ID }}
-      EMAIL_TO: \${{ secrets.EMAIL_TO }}
-      EMAIL_USERNAME: \${{ secrets.EMAIL_USERNAME }}
-      EMAIL_PASSWORD: \${{ secrets.EMAIL_PASSWORD }}
-      SMTP_HOST: \${{ vars.SMTP_HOST }}
-      SMTP_PORT: \${{ vars.SMTP_PORT }}
-      SMTP_SECURITY: \${{ vars.SMTP_SECURITY }}
-      SEND_TELEGRAM: \${{ (github.event_name == 'workflow_dispatch' && inputs.telegram) || (github.event_name == 'schedule' && vars.SEND_TELEGRAM != 'false') }}
-      SEND_EMAIL: \${{ (github.event_name == 'workflow_dispatch' && inputs.email) || (github.event_name == 'schedule' && vars.SEND_EMAIL == 'true') }}
+      GOOGLE_CREDS_B64: ${{ secrets.GOOGLE_CREDS_B64 }}
+      SHEET_ID: ${{ vars.SHEET_ID }}
+      WORKSHEET: ${{ vars.WORKSHEET }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO }}
+      EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+      EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+      SMTP_HOST: ${{ vars.SMTP_HOST }}
+      SMTP_PORT: ${{ vars.SMTP_PORT }}
+      SMTP_SECURITY: ${{ vars.SMTP_SECURITY }}
+      SEND_TELEGRAM: ${{ (github.event_name == 'workflow_dispatch' && inputs.telegram) || (github.event_name == 'schedule' && vars.SEND_TELEGRAM != 'false') }}
+      SEND_EMAIL: ${{ (github.event_name == 'workflow_dispatch' && inputs.email) || (github.event_name == 'schedule' && vars.SEND_EMAIL == 'true') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -65,7 +65,7 @@ jobs:
           if [[ "$SEND_EMAIL" == "true" ]]; then
             args+=(--email)
           fi
-          python script.py "\${args[@]}"
+          python script.py "${args[@]}"
       - name: Instalar Chromium
         run: python -m playwright install --with-deps chromium
       - name: Probar Chromium con la web ficticia local
@@ -73,6 +73,7 @@ jobs:
           ALCAMPO_BROWSER_TESTS: '1'
         run: python -m unittest discover -s tests -p 'test_browser_local.py' -v
       - name: Consultar y generar informe
+        id: run_query
         shell: bash
         run: |
           args=(--max-seconds 3000 --dashboard-dir site)
@@ -82,12 +83,12 @@ jobs:
           if [[ "$SEND_EMAIL" == "true" ]]; then
             args+=(--email)
           fi
-          python script.py "\${args[@]}"
+          python script.py "${args[@]}"
       - name: Conservar informe y progreso, también si falla la ejecución
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: resultados-\${{ github.run_id }}
+          name: resultados-${{ github.run_id }}
           path: |
             resultados/resultados.xlsx
             resultados/cuentas_no_funcionan.xlsx
@@ -96,16 +97,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
       - name: Configurar GitHub Pages
-        if: \${{ success() && ((github.event_name == 'workflow_dispatch' && inputs.pages) || (github.event_name == 'schedule' && vars.PUBLISH_PAGES == 'true')) }}
+        if: ${{ steps.run_query.outcome == 'success' && ((github.event_name == 'workflow_dispatch' && inputs.pages) || (github.event_name == 'schedule' && vars.PUBLISH_PAGES == 'true')) }}
         uses: actions/configure-pages@v5
       - name: Preparar panel para GitHub Pages
-        if: \${{ success() && ((github.event_name == 'workflow_dispatch' && inputs.pages) || (github.event_name == 'schedule' && vars.PUBLISH_PAGES == 'true')) }}
+        if: ${{ steps.run_query.outcome == 'success' && ((github.event_name == 'workflow_dispatch' && inputs.pages) || (github.event_name == 'schedule' && vars.PUBLISH_PAGES == 'true')) }}
         uses: actions/upload-pages-artifact@v4
         with:
           path: site
 
   publicar:
-    if: \${{ needs.consultar.result == 'success' && ((github.event_name == 'workflow_dispatch' && inputs.pages) || (github.event_name == 'schedule' && vars.PUBLISH_PAGES == 'true')) }}
+    if: ${{ needs.consultar.result == 'success' && ((github.event_name == 'workflow_dispatch' && inputs.pages) || (github.event_name == 'schedule' && vars.PUBLISH_PAGES == 'true')) }}
     needs: consultar
     runs-on: ubuntu-latest
     permissions:
@@ -113,7 +114,7 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: \${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Publicar panel
         id: deployment
