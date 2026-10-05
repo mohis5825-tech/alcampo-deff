@@ -1,6 +1,9 @@
 import os
 import re
+import smtplib
+import ssl
 import tempfile
+from email.message import EmailMessage
 from pathlib import Path
 
 from .core import ConfigError
@@ -20,11 +23,47 @@ def export_excel(rows, path: Path, metadata):
                       row["saldo_centimos"] / 100 if row["saldo_centimos"] is not None else None,
                       row["comprobado"], row["detalle"]])
         for col in (1, 2, 4, 5):
-            sheet.cell(sheet.max_row, col).data_type = "s"  # No interpretar fórmulas de datos externos.
+            sheet.cell(sheet.max_row, col).data_type = "s"
         sheet.cell(sheet.max_row, 3).number_format = '#,##0.00 "€"'
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
     for column, width in (("A", 38), ("B", 30), ("C", 18), ("D", 28), ("E", 65)):
+        sheet.column_dimensions[column].width = width
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    summary = book.create_sheet("Resumen")
+    for key, value in metadata.items():
+        summary.append([key, value])
+    summary.column_dimensions["A"].width = 28
+    summary.column_dimensions["B"].width = 65
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, suffix=".xlsx")
+    os.close(fd)
+    try:
+        book.save(temporary)
+        os.replace(temporary, path)
+    finally:
+        book.close()
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def export_invalid_excel(rows, path: Path, metadata):
+    """Guarda aparte las cuentas sin un saldo válido/publicable."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "Cuentas excluidas"
+    sheet.append(["Cuenta", "Estado", "Comprobado UTC", "Detalle"])
+    for row in sorted(rows, key=lambda item: (item["estado"], item["cuenta"])):
+        sheet.append([row["cuenta"], row["estado"], row["comprobado"], row["detalle"]])
+        for col in range(1, 5):
+            sheet.cell(sheet.max_row, col).data_type = "s"
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    for column, width in (("A", 38), ("B", 30), ("C", 28), ("D", 80)):
         sheet.column_dimensions[column].width = width
     for cell in sheet[1]:
         cell.font = Font(bold=True)
@@ -71,3 +110,54 @@ def send_excel(path, config, caption):
             raise ValueError
     except Exception:
         raise ConfigError("Telegram no confirmó el envío. El Excel está guardado; revisa token, chat y acceso del bot. No se reenvió automáticamente") from None
+
+
+def email_config():
+    """Lee SMTP desde el entorno sin imprimir credenciales."""
+    recipient = os.environ.get("EMAIL_TO", "").strip()
+    username = os.environ.get("EMAIL_USERNAME", "").strip()
+    password = os.environ.get("EMAIL_PASSWORD", "")
+    host = os.environ.get("SMTP_HOST", "smtp.gmail.com").strip()
+    security = os.environ.get("SMTP_SECURITY", "ssl").strip().lower()
+    try:
+        port = int(os.environ.get("SMTP_PORT", "465"))
+    except ValueError:
+        port = 0
+    valid_address = r"[^\s@]+@[^\s@]+\.[^\s@]+"
+    if not re.fullmatch(valid_address, recipient) or not re.fullmatch(valid_address, username):
+        raise ConfigError("El correo necesita EMAIL_TO y EMAIL_USERNAME válidos")
+    if not password or not host or port not in range(1, 65536) or security not in {"ssl", "starttls"}:
+        raise ConfigError("El correo necesita SMTP_HOST, SMTP_PORT, SMTP_SECURITY y EMAIL_PASSWORD válidos")
+    return recipient, username, password, host, port, security
+
+
+def send_email(path, caption):
+    """Envía el Excel como adjunto mediante SMTP."""
+    recipient, username, password, host, port, security = email_config()
+    message = EmailMessage()
+    message["From"] = username
+    message["To"] = recipient
+    message["Subject"] = "Informe Alcampo"
+    message.set_content(caption)
+    with Path(path).open("rb") as document:
+        message.add_attachment(
+            document.read(),
+            maintype="application",
+            subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=Path(path).name,
+        )
+    try:
+        context = ssl.create_default_context()
+        if security == "ssl":
+            with smtplib.SMTP_SSL(host, port, context=context, timeout=60) as server:
+                server.login(username, password)
+                server.send_message(message)
+        else:
+            with smtplib.SMTP(host, port, timeout=60) as server:
+                server.ehlo()
+                server.starttls(context=context)
+                server.ehlo()
+                server.login(username, password)
+                server.send_message(message)
+    except Exception:
+        raise ConfigError("El correo no confirmó el envío; revisa EMAIL_TO, SMTP y la contraseña de aplicación. El Excel está guardado") from None
