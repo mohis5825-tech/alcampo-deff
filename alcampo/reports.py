@@ -117,10 +117,11 @@ def email_config():
     recipient = os.environ.get("EMAIL_TO", "").strip()
     username = os.environ.get("EMAIL_USERNAME", "").strip()
     password = os.environ.get("EMAIL_PASSWORD", "")
-    host = os.environ.get("SMTP_HOST", "smtp.gmail.com").strip()
-    security = os.environ.get("SMTP_SECURITY", "ssl").strip().lower()
+    host = os.environ.get("SMTP_HOST", "").strip() or "smtp.gmail.com"
+    security = os.environ.get("SMTP_SECURITY", "").strip().lower() or "ssl"
+    raw_port = os.environ.get("SMTP_PORT", "").strip() or "465"
     try:
-        port = int(os.environ.get("SMTP_PORT", "465"))
+        port = int(raw_port)
     except ValueError:
         port = 0
     valid_address = r"[^\s@]+@[^\s@]+\.[^\s@]+"
